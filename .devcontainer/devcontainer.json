@@ -1,0 +1,26 @@
+{
+  "build": {
+    "dockerfile": "../Dockerfile"
+  },
+  "runArgs": [
+    "--name=multiview_3d_tracking",
+    "--net=host",
+    "--ipc=host",
+    "--device=/dev/kfd",
+    "--device=/dev/dri",
+    "--security-opt",
+    "label=disable",
+    "--group-add",
+    "keep-groups"
+  ],
+  "containerEnv": {
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
+    "XDG_RUNTIME_DIR": "/tmp/runtime-dir"
+  },
+  "mounts": [
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind",
+    "source=${localEnv:XDG_RUNTIME_DIR}/${localEnv:WAYLAND_DISPLAY},target=/tmp/runtime-dir/${localEnv:WAYLAND_DISPLAY},type=bind,readonly",
+    "source=fish-history,target=/root/.local/share/fish,type=volume"
+  ]
+}
