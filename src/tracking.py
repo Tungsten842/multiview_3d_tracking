@@ -39,7 +39,6 @@ def plot_tracks_rerun(
         ]
     )
 
-    rr.log(f"{entity_path}/image", rr.Image(frame), static=True)
     rr.log(
         f"{entity_path}/tracks",
         rr.Boxes2D(
@@ -54,13 +53,10 @@ def plot_tracks_rerun(
     )
     rr.log(
         f"{entity_path}/centroids",
-        rr.Points2D(
-            positions=centroids,
-            colors=colors,
-            radii=8
-        ),
+        rr.Points2D(positions=centroids, colors=colors, radii=8),
         static=True,
     )
+    rr.log(f"{entity_path}/image", rr.Image(frame), static=True)
 
 
 class Track:
@@ -73,9 +69,7 @@ class Track:
         self.num_cams = num_cams
         self.conf_threshold = conf_threshold
         self.nms_threshold = nms_threshold
-        self.trackers = [
-            ByteTrack(frame_rate=25) for _ in range(num_cams)
-        ]
+        self.trackers = [ByteTrack(frame_rate=25) for _ in range(num_cams)]
 
     def update(self, predictions, frames):
         results = []
@@ -96,8 +90,13 @@ class Track:
                 boxes_xywh = boxes.copy()
                 boxes_xywh[:, :2] -= boxes_xywh[:, 2:] / 2.0
 
+                # Shift coordinates by class ID so different classes never overlap
+                max_dim = 10000.0
+                boxes_offset = boxes_xywh.copy()
+                boxes_offset[:, :2] += cls_ids[:, None] * max_dim
+
                 nms_indices = cv2.dnn.NMSBoxes(
-                    boxes_xywh,
+                    boxes_offset,
                     scores,
                     0.0,
                     self.nms_threshold,
@@ -106,7 +105,8 @@ class Track:
                 if len(nms_indices) > 0:
                     idx = np.asarray(nms_indices).flatten()
 
-                    boxes_xyxy = boxes_xywh[idx]
+                    # Convert original un-shifted boxes from xywh -> xyxy
+                    boxes_xyxy = boxes_xywh[idx].copy()
                     boxes_xyxy[:, 2:] += boxes_xyxy[:, :2]
 
                     detections = np.column_stack(
@@ -150,8 +150,8 @@ def run_tracking(
 
     tracker = Track(
         num_cams=pred_shape[0],
-        conf_threshold=0.05,
-        nms_threshold=0.05,
+        conf_threshold=0.20,
+        nms_threshold=0.75,
     )
 
     rr.init(
