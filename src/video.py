@@ -6,6 +6,14 @@ import cv2
 import numpy as np
 
 
+def crop_and_resize(img, dsize):
+    tw, th = dsize
+    h, w = img.shape[:2]
+    cw, ch = w, int(w * th / tw)
+    x, y = (w - cw) // 2, (h - ch) // 2
+    return cv2.resize(img[y : y + ch, x : x + cw], dsize, interpolation=cv2.INTER_AREA)
+
+
 class VideoWorker(Thread):
     def __init__(self, video_path, target_size, queue_size=3):
         super().__init__(daemon=True)
@@ -30,13 +38,11 @@ class VideoWorker(Thread):
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 continue
 
-            resized = cv2.resize(
-                frame, self.target_size, interpolation=cv2.INTER_LINEAR
-            )
+            resized = crop_and_resize(frame, self.target_size)
             rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
             chw = rgb.transpose(2, 0, 1)
 
-            processed = chw.astype(np.float32) * self.inv_255
+            processed = chw.astype(np.float16) * self.inv_255
 
             self.queue.put(processed)
 
@@ -55,8 +61,7 @@ class BatchProducer(Thread):
     def run(self):
         shm_blocks = [SharedMemory(name=name) for name in self.shm_names]
         buffers = [
-            # np.ndarray(self.batch_shape, dtype=np.float16, buffer=shm.buf)
-            np.ndarray(self.batch_shape, dtype=np.float32, buffer=shm.buf)
+            np.ndarray(self.batch_shape, dtype=np.float16, buffer=shm.buf)
             for shm in shm_blocks
         ]
 

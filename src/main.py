@@ -12,17 +12,17 @@ from video import run_producer
 def main():
     mp.set_start_method("spawn", force=True)
 
-    video_names = ["out2d.mp4", "out4d.mp4", "out13d.mp4"]
+    video_names = ["out4d.mp4", "out13d.mp4"]
     video_path = Path("video")
     video_sources = [str(video_path / name) for name in video_names]
 
-    model_file = "yolo11n_int8.onnx"
+    model_file = "yolo11n.onnx"
     target_size = (1280, 704)
     batch_size = len(video_sources)
     num_slots = 6
 
     batch_shape = (batch_size, 3, target_size[1], target_size[0])
-    frame_bytes = int(np.prod(batch_shape) * np.dtype(np.float32).itemsize)
+    frame_bytes = int(np.prod(batch_shape) * np.dtype(np.float16).itemsize)
 
     frame_shm_pools = [
         SharedMemory(create=True, size=frame_bytes) for _ in range(num_slots)

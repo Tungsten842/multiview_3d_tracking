@@ -1,9 +1,9 @@
 from multiprocessing.shared_memory import SharedMemory
 
-import cv2
 import numpy as np
 import rerun as rr
-from boxmot.trackers.bbox.bytetrack import ByteTrack
+
+from track2d import Tracker2D
 
 
 def plot_tracks_rerun(
@@ -59,66 +59,6 @@ def plot_tracks_rerun(
     rr.log(f"{entity_path}/image", rr.Image(frame), static=True)
 
 
-class Track:
-    def __init__(
-        self,
-        num_cams,
-        conf_threshold,
-        nms_threshold,
-    ):
-        self.num_cams = num_cams
-        self.conf_threshold = conf_threshold
-        self.nms_threshold = nms_threshold
-        self.trackers = [ByteTrack(frame_rate=25) for _ in range(num_cams)]
-
-    def update(self, predictions, frames):
-        results = []
-
-        for i in range(self.num_cams):
-            pred = predictions[i].T
-            boxes, class_scores = pred[:, :4], pred[:, 4:]
-
-            scores = np.max(class_scores, axis=1)
-            cls_ids = np.argmax(class_scores, axis=1)
-
-            mask = scores > self.conf_threshold
-            boxes, scores, cls_ids = boxes[mask], scores[mask], cls_ids[mask]
-
-            detections = np.empty((0, 6), dtype=np.float32)
-
-            if len(boxes) > 0:
-                boxes_xywh = boxes.copy()
-                boxes_xywh[:, :2] -= boxes_xywh[:, 2:] / 2.0
-
-                # Shift coordinates by class ID so different classes never overlap
-                max_dim = 10000.0
-                boxes_offset = boxes_xywh.copy()
-                boxes_offset[:, :2] += cls_ids[:, None] * max_dim
-
-                nms_indices = cv2.dnn.NMSBoxes(
-                    boxes_offset,
-                    scores,
-                    0.0,
-                    self.nms_threshold,
-                )
-
-                if len(nms_indices) > 0:
-                    idx = np.asarray(nms_indices).flatten()
-
-                    # Convert original un-shifted boxes from xywh -> xyxy
-                    boxes_xyxy = boxes_xywh[idx].copy()
-                    boxes_xyxy[:, 2:] += boxes_xyxy[:, :2]
-
-                    detections = np.column_stack(
-                        (boxes_xyxy, scores[idx], cls_ids[idx])
-                    )
-
-            tracks = self.trackers[i].update(detections, frames[i])
-            results.append(tracks)
-
-        return results
-
-
 def run_tracking(
     pred_ready_queue,
     pred_free_queue,
@@ -142,13 +82,13 @@ def run_tracking(
     frame_arrays = [
         np.ndarray(
             frame_shape,
-            dtype=np.float32,
+            dtype=np.float16,
             buffer=shm.buf,
         )
         for shm in frame_shms
     ]
 
-    tracker = Track(
+    tracker_2d = Tracker2D(
         num_cams=pred_shape[0],
         conf_threshold=0.20,
         nms_threshold=0.75,
@@ -167,7 +107,7 @@ def run_tracking(
             frames = frame_arrays[frame_slot]
             frames = np.transpose(frames, (0, 2, 3, 1))
 
-            results = tracker.update(
+            tracks_2d = tracker_2d.update(
                 predictions,
                 frames,
             )
@@ -176,7 +116,7 @@ def run_tracking(
             plot_tracks_rerun(
                 1,
                 frames[camera_idx],
-                results[camera_idx],
+                tracks_2d[camera_idx],
             )
 
             pred_free_queue.put(pred_slot)

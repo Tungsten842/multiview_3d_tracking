@@ -21,7 +21,7 @@ def run_inference(
     pred_shms = [SharedMemory(name=name) for name in pred_shm_names]
 
     frame_arrays = [
-        np.ndarray(frame_shape, dtype=np.float32, buffer=shm.buf) for shm in frame_shms
+        np.ndarray(frame_shape, dtype=np.float16, buffer=shm.buf) for shm in frame_shms
     ]
     pred_arrays = [
         np.ndarray(pred_shape, dtype=np.float32, buffer=shm.buf) for shm in pred_shms
