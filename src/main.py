@@ -9,6 +9,24 @@ from tracking import run_tracking
 from video import run_producer
 
 
+def profile_tracking(*args):
+    from line_profiler import LineProfiler
+
+    from track2d import Tracker2D
+    from tracking import plot_tracks_rerun
+
+    lp = LineProfiler()
+    lp.add_function(run_tracking)
+    lp.add_function(Tracker2D.update)
+    lp.add_function(plot_tracks_rerun)
+    wrapped_run_tracking = lp(run_tracking)
+    try:
+        wrapped_run_tracking(*args)
+    finally:
+        lp.print_stats()
+        lp.dump_stats("tracking_profile.lprof")
+
+
 def main():
     mp.set_start_method("spawn", force=True)
 
@@ -74,6 +92,7 @@ def main():
         ),
     )
     p3_tracking = mp.Process(
+        # target=profile_tracking,
         target=run_tracking,
         args=(
             pred_ready_queue,

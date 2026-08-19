@@ -14,6 +14,7 @@ class Tracker2D:
         self.conf_threshold = conf_threshold
         self.nms_threshold = nms_threshold
         self.trackers = [ByteTrack(frame_rate=25) for _ in range(num_cams)]
+        self.img = np.empty((1, 1))
 
     def update(self, predictions, frames):
         results = []
@@ -57,7 +58,7 @@ class Tracker2D:
                         (boxes_xyxy, scores[idx], cls_ids[idx])
                     )
 
-            tracks = self.trackers[i].update(detections, frames[i])
+            tracks = self.trackers[i].update(detections, self.img)
             results.append(tracks)
 
         return results

@@ -4,6 +4,33 @@ import numpy as np
 import rerun as rr
 
 from track2d import Tracker2D
+from track3d import Tracker3D
+
+
+def plot_tracks_3d_rerun(tracks_3d: list) -> None:
+    if len(tracks_3d) == 0:
+        return
+    positions = np.array([t["pos"] for t in tracks_3d])
+    track_ids = np.array([t["id"] for t in tracks_3d])
+    labels = [tid for tid in track_ids]
+    colors = np.column_stack(
+        [
+            (track_ids * 17) % 200 + 100,
+            (track_ids * 31) % 200 + 100,
+            (track_ids * 47) % 200 + 100,
+        ]
+    ).astype(np.uint8)
+    rr.log(
+        "world/tracks3d/positions",
+        rr.Points3D(positions=positions, colors=colors, radii=0.15),
+        static=True,
+    )
+    sizes = np.full((len(positions), 3), [0.6, 0.6, 1.7])
+    rr.log(
+        "world/tracks3d/boxes",
+        rr.Boxes3D(centers=positions, sizes=sizes, colors=colors, labels=labels),
+        static=True,
+    )
 
 
 def plot_tracks_rerun(
@@ -12,8 +39,6 @@ def plot_tracks_rerun(
     tracks: np.ndarray | None,
 ) -> None:
     entity_path = f"cameras/camera_{camera_idx}"
-
-    frame = (frame * 255).astype(np.uint8)
 
     boxes = tracks[:, :4]
     track_ids = tracks[:, 4]
@@ -67,6 +92,7 @@ def run_tracking(
     frame_free_queue,
     frame_shm_names,
     frame_shape,
+    calib_dir="camera",
 ):
     pred_shms = [SharedMemory(name=name) for name in pred_shm_names]
     frame_shms = [SharedMemory(name=name) for name in frame_shm_names]
@@ -94,10 +120,47 @@ def run_tracking(
         nms_threshold=0.75,
     )
 
+    tracker_3d = Tracker3D(calib_dir)
+
+    for i, cam in enumerate(tracker_3d.cameras):
+        rr.log(
+            f"cameras/camera_{i}",
+            rr.Transform3D(translation=cam["center"], mat3x3=cam["R"].T),
+            static=True,
+        )
+
     rr.init(
         "multiview_3d_tracking",
     )
     rr.connect_grpc()
+
+    rr.log(
+        "world/origin",
+        rr.Arrows3D(
+            origins=[[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+            vectors=[[2.0, 0, 0], [0, 2.0, 0], [0, 0, 2.0]],
+            colors=[[255, 0, 0], [0, 255, 0], [0, 0, 255]],
+        ),
+        static=True,
+    )
+
+    rr.log(
+        "world/floor",
+        rr.Mesh3D(
+            vertex_positions=[
+                [-22, -10.4, 0],
+                [22, -10.4, 0],
+                [22, 10.4, 0],
+                [-22, 10.4, 0],
+            ],
+            triangle_indices=[
+                [0, 1, 2],
+                [0, 2, 3],
+            ],
+            vertex_colors=[[70, 70, 70]] * 4,
+        ),
+        static=True,
+    )
 
     try:
         while True:
@@ -118,6 +181,8 @@ def run_tracking(
                 frames[camera_idx],
                 tracks_2d[camera_idx],
             )
+            tracks_3d = tracker_3d.update(tracks_2d)
+            plot_tracks_3d_rerun(tracks_3d)
 
             pred_free_queue.put(pred_slot)
             frame_free_queue.put(frame_slot)
