@@ -1,7 +1,9 @@
+import sys
 from multiprocessing.shared_memory import SharedMemory
 
 import numpy as np
 import rerun as rr
+import supervision as sv
 
 from track2d import Tracker2D
 from track3d import Tracker3D
@@ -31,6 +33,48 @@ def plot_tracks_3d_rerun(tracks_3d: list) -> None:
         rr.Boxes3D(centers=positions, sizes=sizes, colors=colors, labels=labels),
         static=True,
     )
+
+
+class TrackSaver:
+    def __init__(self, num_cams=2):
+        self.annotations_2d = [[] for _ in range(num_cams)]
+
+    def save(self, tracks, frame_index):
+        for cam_idx in range(len(self.annotations_2d)):
+            cam_tracks = tracks[cam_idx]
+            detections = sv.Detections(
+                xyxy=cam_tracks[:, :4],
+                class_id=cam_tracks[:, 6].astype(int),
+                tracker_id=cam_tracks[:, 4].astype(int),
+            )
+            mask = np.isin(detections.class_id, [0, 1])
+            detections = detections[mask]
+
+            self.annotations_2d[cam_idx].append(detections)
+
+        if frame_index == 525:
+            images_dict = {}
+            annotations_dict = {}
+            dummy_image = np.zeros((1280, 720, 3), dtype=np.uint8)
+
+            for cam_idx in range(len(self.annotations_2d)):
+                for i, detections in enumerate(self.annotations_2d[cam_idx]):
+                    name = f"cam{cam_idx}_item{i}.png"
+                    images_dict[name] = dummy_image
+
+                    annotations_dict[name] = detections
+
+            dataset = sv.DetectionDataset(
+                classes=["player", "sports balls"],
+                images=images_dict,
+                annotations=annotations_dict,
+            )
+
+            dataset.as_coco(
+                annotations_path="annotations.json",
+                images_directory_path=None,
+            )
+            sys.exit()
 
 
 def plot_tracks_rerun(
@@ -162,8 +206,11 @@ def run_tracking(
         static=True,
     )
 
+    frame_index = 0
+    track_saver = TrackSaver()
     try:
         while True:
+            frame_index += 1
             pred_slot, frame_slot = pred_ready_queue.get()
 
             predictions = pred_arrays[pred_slot]
@@ -186,6 +233,8 @@ def run_tracking(
 
             pred_free_queue.put(pred_slot)
             frame_free_queue.put(frame_slot)
+
+            track_saver.save(tracks_2d, frame_index)
 
     finally:
         for shm in pred_shms:
