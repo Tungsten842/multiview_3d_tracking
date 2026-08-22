@@ -34,7 +34,7 @@ def main():
     video_path = Path("video")
     video_sources = [str(video_path / name) for name in video_names]
 
-    model_file = "yolo11n.onnx"
+    model_file = "yolo11-p2.onnx"
     target_size = (1280, 704)
     batch_size = len(video_sources)
     num_slots = 6
@@ -52,7 +52,7 @@ def main():
     for i in range(num_slots):
         frame_free_queue.put(i)
 
-    pred_shape = (batch_size, 84, 18480)
+    pred_shape = (batch_size, 6, 73920)
     pred_bytes = int(np.prod(pred_shape) * np.dtype(np.float32).itemsize)
 
     pred_shm_pools = [
