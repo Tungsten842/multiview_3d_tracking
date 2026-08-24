@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
-from boxmot.trackers.bbox.bytetrack import ByteTrack
+import supervision as sv
+from trackers import ByteTrackTracker
 
 
 class Tracker2D:
@@ -13,7 +14,7 @@ class Tracker2D:
         self.num_cams = num_cams
         self.conf_threshold = conf_threshold
         self.nms_threshold = nms_threshold
-        self.trackers = [ByteTrack(frame_rate=25) for _ in range(num_cams)]
+        self.trackers = [ByteTrackTracker(frame_rate=25) for _ in range(num_cams)]
         self.img = np.empty((1, 1))
 
     def update(self, predictions, frames):
@@ -58,7 +59,24 @@ class Tracker2D:
                         (boxes_xyxy, scores[idx], cls_ids[idx])
                     )
 
-            tracks = self.trackers[i].update(detections, self.img)
+            sv_detections = sv.Detections(
+                xyxy=detections[:, :4].astype(np.float32),
+                confidence=detections[:, 4].astype(np.float32),
+                class_id=detections[:, 5].astype(int),
+            )
+            sv_tracks = self.trackers[i].update(sv_detections)
+            tracks = (
+                np.column_stack(
+                    (
+                        sv_tracks.xyxy,
+                        sv_tracks.tracker_id,
+                        sv_tracks.confidence,
+                        sv_tracks.class_id,
+                    )
+                )
+                if len(sv_tracks)
+                else np.empty((0, 7), dtype=np.float32)
+            )
             results.append(tracks)
 
         return results

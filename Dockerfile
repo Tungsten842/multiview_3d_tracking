@@ -10,6 +10,6 @@ RUN apt update && apt install -y locales fish \
     && locale-gen en_US en_US.UTF-8 \
     && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
 
-RUN /opt/venv/bin/pip install onnx onnxslim opencv-python ultralytics boxmot rerun_sdk supervision
+RUN /opt/venv/bin/pip install onnx onnxslim opencv-python ultralytics trackers rerun_sdk supervision
 
 WORKDIR /workspaces/multiview_3d_tracking

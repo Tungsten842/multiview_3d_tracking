@@ -1,6 +1,8 @@
+import os
 import sys
 from multiprocessing.shared_memory import SharedMemory
 
+import cv2
 import numpy as np
 import rerun as rr
 import supervision as sv
@@ -36,52 +38,52 @@ def plot_tracks_3d_rerun(tracks_3d: list) -> None:
 
 
 class TrackSaver:
-    def __init__(self, num_cams=2):
-        self.annotations_2d = [[] for _ in range(num_cams)]
+    def __init__(self, num_cams=2, output_dir="predictions"):
+        self.num_cams = num_cams
+        self.output_dir = output_dir
+        self.sample_counts = [0] * num_cams
+
+        self.mot_lines = {(4 if i == 0 else 13): [] for i in range(num_cams)}
+
+        os.makedirs(self.output_dir, exist_ok=True)
 
     def save(self, tracks, frame_index):
-        for cam_idx in range(len(self.annotations_2d)):
-            cam_tracks = tracks[cam_idx]
-            detections = sv.Detections(
-                xyxy=cam_tracks[:, :4],
-                class_id=cam_tracks[:, 6].astype(int),
-                tracker_id=cam_tracks[:, 4].astype(int),
-            )
-            mask = np.isin(detections.class_id, [0, 1])
-            detections = detections[mask]
+        if (frame_index - 2) % 5 == 0:
+            for cam_idx in range(self.num_cams):
+                cam_tracks = tracks[cam_idx]
+                if len(cam_tracks) == 0:
+                    continue
 
-            self.annotations_2d[cam_idx].append(detections)
+                class_ids = cam_tracks[:, 6].astype(int)
+                mask = np.isin(class_ids, [0, 1])
+                filtered_tracks = cam_tracks[mask]
 
-        if frame_index == 525:
-            images_dict = {}
-            annotations_dict = {}
-            dummy_image = np.zeros((1280, 720, 3), dtype=np.uint8)
+                self.sample_counts[cam_idx] += 1
+                cidx = 4 if cam_idx == 0 else 13
+                mot_frame_idx = self.sample_counts[cam_idx]
 
-            for cam_idx in range(len(self.annotations_2d)):
-                for i, detections in enumerate(self.annotations_2d[cam_idx]):
-                    name = f"cam{cam_idx}_item{i}.png"
-                    images_dict[name] = dummy_image
+                for track in filtered_tracks:
+                    x1, y1, x2, y2 = track[:4]
+                    w = x2 - x1
+                    h = y2 - y1
 
-                    annotations_dict[name] = detections
+                    track_id = int(track[4])
+                    conf = float(track[5])
 
-            dataset = sv.DetectionDataset(
-                classes=["player", "sports balls"],
-                images=images_dict,
-                annotations=annotations_dict,
-            )
+                    line = f"{mot_frame_idx},{track_id},{x1:.2f},{y1:.2f},{w:.2f},{h:.2f},{conf:.2f},-1,-1,-1\n"
+                    self.mot_lines[cidx].append(line)
 
-            dataset.as_coco(
-                annotations_path="annotations.json",
-                images_directory_path=None,
-            )
+        if frame_index == 500:
+            for cidx, lines in self.mot_lines.items():
+                mot_path = os.path.join(self.output_dir, f"out{cidx}_mot.txt")
+                with open(mot_path, "w") as f:
+                    f.writelines(lines)
+                print(f"MOT predictions saved to {mot_path}", flush=True)
+
             sys.exit()
 
 
-def plot_tracks_rerun(
-    camera_idx: int,
-    frame: np.ndarray,
-    tracks: np.ndarray | None,
-) -> None:
+def plot_tracks_rerun(camera_idx, frame, tracks, frame_index):
     entity_path = f"cameras/camera_{camera_idx}"
 
     boxes = tracks[:, :4]
@@ -125,7 +127,8 @@ def plot_tracks_rerun(
         rr.Points2D(positions=centroids, colors=colors, radii=8),
         static=True,
     )
-    rr.log(f"{entity_path}/image", rr.Image(frame), static=True)
+    if frame_index % 2 == 0:
+        rr.log(f"{entity_path}/image", rr.Image(frame), static=True)
 
 
 def run_tracking(
@@ -207,10 +210,9 @@ def run_tracking(
     )
 
     frame_index = 0
-    track_saver = TrackSaver()
+    # track_saver = TrackSaver()
     try:
         while True:
-            frame_index += 1
             pred_slot, frame_slot = pred_ready_queue.get()
 
             predictions = pred_arrays[pred_slot]
@@ -221,20 +223,16 @@ def run_tracking(
                 predictions,
                 frames,
             )
+            # track_saver.save(tracks_2d, frame_index)
 
             camera_idx = 1
-            plot_tracks_rerun(
-                1,
-                frames[camera_idx],
-                tracks_2d[camera_idx],
-            )
+            plot_tracks_rerun(1, frames[camera_idx], tracks_2d[camera_idx], frame_index)
             tracks_3d = tracker_3d.update(tracks_2d)
             plot_tracks_3d_rerun(tracks_3d)
 
             pred_free_queue.put(pred_slot)
             frame_free_queue.put(frame_slot)
-
-            track_saver.save(tracks_2d, frame_index)
+            frame_index += 1
 
     finally:
         for shm in pred_shms:
