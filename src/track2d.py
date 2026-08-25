@@ -1,20 +1,29 @@
 import cv2
 import numpy as np
 import supervision as sv
-from trackers import ByteTrackTracker
+from trackers import ByteTrackTracker, DIoU
+from trackers.utils.state_representations import XCYCSRStateEstimator
 
 
 class Tracker2D:
-    def __init__(
-        self,
-        num_cams,
-        conf_threshold,
-        nms_threshold,
-    ):
+    def __init__(self, num_cams, conf_threshold, nms_threshold, ball_class_id=1):
         self.num_cams = num_cams
         self.conf_threshold = conf_threshold
         self.nms_threshold = nms_threshold
-        self.trackers = [ByteTrackTracker(frame_rate=25) for _ in range(num_cams)]
+        self.ball_class_id = ball_class_id
+        self.trackers = [
+            ByteTrackTracker(frame_rate=25, iou=DIoU()) for _ in range(num_cams)
+        ]
+        self.ball_trackers = [
+            ByteTrackTracker(
+                frame_rate=25,
+                state_estimator_class=XCYCSRStateEstimator,
+                track_activation_threshold=0.2,
+                iou=DIoU(),
+            )
+            for _ in range(num_cams)
+        ]
+
         self.img = np.empty((1, 1))
 
     def update(self, predictions, frames):
@@ -36,13 +45,8 @@ class Tracker2D:
                 boxes_xywh = boxes.copy()
                 boxes_xywh[:, :2] -= boxes_xywh[:, 2:] / 2.0
 
-                # Shift coordinates by class ID so different classes never overlap
-                max_dim = 10000.0
-                boxes_offset = boxes_xywh.copy()
-                boxes_offset[:, :2] += cls_ids[:, None] * max_dim
-
                 nms_indices = cv2.dnn.NMSBoxes(
-                    boxes_offset,
+                    boxes_xywh,
                     scores,
                     0.0,
                     self.nms_threshold,
@@ -64,19 +68,34 @@ class Tracker2D:
                 confidence=detections[:, 4].astype(np.float32),
                 class_id=detections[:, 5].astype(int),
             )
-            sv_tracks = self.trackers[i].update(sv_detections)
+
+            # Split detections by class
+            is_ball = sv_detections.class_id == self.ball_class_id
+            ball_dets = sv_detections[is_ball]
+            other_dets = sv_detections[~is_ball]
+
+            # Track independently
+            other_tracks = self.trackers[i].update(other_dets)
+            ball_tracks = self.ball_trackers[i].update(ball_dets)
+
+            # Merge results
+            merged = sv.Detections.merge(
+                [t for t in (other_tracks, ball_tracks) if len(t) > 0]
+            )
             tracks = (
                 np.column_stack(
                     (
-                        sv_tracks.xyxy,
-                        sv_tracks.tracker_id,
-                        sv_tracks.confidence,
-                        sv_tracks.class_id,
+                        merged.xyxy,
+                        merged.tracker_id,
+                        merged.confidence,
+                        merged.class_id,
                     )
-                )
-                if len(sv_tracks)
+                ).astype(np.float32)
+                if len(merged) > 0
                 else np.empty((0, 7), dtype=np.float32)
             )
+            # Discart unconfirmed tracks
+            tracks = tracks[tracks[:, 4] > 0]
             results.append(tracks)
 
         return results

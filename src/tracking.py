@@ -27,7 +27,12 @@ def plot_tracks_3d_rerun(tracks_3d: list) -> None:
         rr.Points3D(positions=positions, colors=colors, radii=0.15),
         static=True,
     )
-    sizes = np.full((len(positions), 3), [0.6, 0.6, 1.7])
+    sizes = np.array(
+        [
+            [0.24, 0.24, 0.24] if t.get("class") == 1 else [0.6, 0.6, 1.7]
+            for t in tracks_3d
+        ]
+    )
     rr.log(
         "world/tracks3d/boxes",
         rr.Boxes3D(centers=positions, sizes=sizes, colors=colors, labels=labels),
@@ -162,8 +167,8 @@ def run_tracking(
 
     tracker_2d = Tracker2D(
         num_cams=pred_shape[0],
-        conf_threshold=0.20,
-        nms_threshold=0.75,
+        conf_threshold=0.10,
+        nms_threshold=0.60,
     )
 
     tracker_3d = Tracker3D(calib_dir)
