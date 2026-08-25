@@ -37,7 +37,7 @@ def load_camera_calibrations(
     target_res=(1280, 704),
 ):
     files = [
-        os.path.join(calib_dir, "4.json"),
+        os.path.join(calib_dir, "2.json"),
         os.path.join(calib_dir, "13.json"),
     ]
 

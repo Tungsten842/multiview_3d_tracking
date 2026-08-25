@@ -30,7 +30,7 @@ def profile_tracking(*args):
 def main():
     mp.set_start_method("spawn", force=True)
 
-    video_names = ["out4d.mp4", "out13d.mp4"]
+    video_names = ["out2d.mp4", "out13d.mp4"]
     video_path = Path("video")
     video_sources = [str(video_path / name) for name in video_names]
 

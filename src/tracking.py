@@ -2,10 +2,8 @@ import os
 import sys
 from multiprocessing.shared_memory import SharedMemory
 
-import cv2
 import numpy as np
 import rerun as rr
-import supervision as sv
 
 from track2d import Tracker2D
 from track3d import Tracker3D
@@ -38,12 +36,13 @@ def plot_tracks_3d_rerun(tracks_3d: list) -> None:
 
 
 class TrackSaver:
+    CAM_IDS = (2, 13)
+
     def __init__(self, num_cams=2, output_dir="predictions"):
         self.num_cams = num_cams
         self.output_dir = output_dir
         self.sample_counts = [0] * num_cams
-
-        self.mot_lines = {(4 if i == 0 else 13): [] for i in range(num_cams)}
+        self.mot_lines = {self.CAM_IDS[i]: [] for i in range(num_cams)}
 
         os.makedirs(self.output_dir, exist_ok=True)
 
@@ -59,7 +58,7 @@ class TrackSaver:
                 filtered_tracks = cam_tracks[mask]
 
                 self.sample_counts[cam_idx] += 1
-                cidx = 4 if cam_idx == 0 else 13
+                cidx = self.CAM_IDS[cam_idx]
                 mot_frame_idx = self.sample_counts[cam_idx]
 
                 for track in filtered_tracks:
@@ -226,7 +225,9 @@ def run_tracking(
             # track_saver.save(tracks_2d, frame_index)
 
             camera_idx = 1
-            plot_tracks_rerun(1, frames[camera_idx], tracks_2d[camera_idx], frame_index)
+            plot_tracks_rerun(
+                camera_idx, frames[camera_idx], tracks_2d[camera_idx], frame_index
+            )
             tracks_3d = tracker_3d.update(tracks_2d)
             plot_tracks_3d_rerun(tracks_3d)
 
