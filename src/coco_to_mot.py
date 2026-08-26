@@ -31,7 +31,7 @@ def convert_coco_to_mot(coco_path, out_path):
 
         with open(f"{base}_{cam_id}{ext}", "w") as f:
             for a in anns:
-                fid = frame_map[a["image_id"]] - 1
+                fid = frame_map[a["image_id"]]
                 x, y, w, h = a["bbox"]
 
                 x /= 3.0

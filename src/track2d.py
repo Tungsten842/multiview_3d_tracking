@@ -6,22 +6,57 @@ from trackers.utils.state_representations import XCYCSRStateEstimator
 
 
 class Tracker2D:
-    def __init__(self, num_cams, conf_threshold, nms_threshold, ball_class_id=1):
+    def __init__(
+        self,
+        num_cams,
+        conf_threshold=0.2,
+        ball_conf_threshold=0.02,
+        nms_threshold=0.40,
+        ball_class_id=1,
+    ):
         self.num_cams = num_cams
         self.conf_threshold = conf_threshold
+        self.ball_conf_threshold = ball_conf_threshold
         self.nms_threshold = nms_threshold
         self.ball_class_id = ball_class_id
+        self.frame_rate = 25
         self.trackers = [
-            ByteTrackTracker(frame_rate=25, iou=DIoU()) for _ in range(num_cams)
+            ByteTrackTracker(
+                frame_rate=self.frame_rate,
+                lost_track_buffer=self.frame_rate * 2,
+                high_conf_det_threshold=0.6,
+                track_activation_threshold=0.6,
+                iou=DIoU(),
+            ),
+            ByteTrackTracker(
+                frame_rate=self.frame_rate,
+                lost_track_buffer=self.frame_rate * 2,
+                high_conf_det_threshold=0.5,
+                track_activation_threshold=0.5,
+                iou=DIoU(),
+            ),
         ]
         self.ball_trackers = [
             ByteTrackTracker(
-                frame_rate=25,
+                frame_rate=self.frame_rate,
+                lost_track_buffer=self.frame_rate * 3,
+                high_conf_det_threshold=0.20,
+                track_activation_threshold=0.20,
                 state_estimator_class=XCYCSRStateEstimator,
-                track_activation_threshold=0.2,
+                minimum_iou_threshold=-10,
+                minimum_consecutive_frames=0,
                 iou=DIoU(),
-            )
-            for _ in range(num_cams)
+            ),
+            ByteTrackTracker(
+                frame_rate=self.frame_rate,
+                lost_track_buffer=self.frame_rate * 3,
+                high_conf_det_threshold=0.10,
+                track_activation_threshold=0.10,
+                state_estimator_class=XCYCSRStateEstimator,
+                minimum_iou_threshold=-10,
+                minimum_consecutive_frames=0,
+                iou=DIoU(),
+            ),
         ]
 
         self.img = np.empty((1, 1))
@@ -33,11 +68,13 @@ class Tracker2D:
             pred = predictions[i].T
             boxes, class_scores = pred[:, :4], pred[:, 4:]
 
-            scores = np.max(class_scores, axis=1)
-            cls_ids = np.argmax(class_scores, axis=1)
-
-            mask = scores > self.conf_threshold
-            boxes, scores, cls_ids = boxes[mask], scores[mask], cls_ids[mask]
+            # Class-specific threshold
+            num_classes = class_scores.shape[1]
+            thresholds = np.full(num_classes, self.conf_threshold)
+            thresholds[self.ball_class_id] = self.ball_conf_threshold
+            box_indices, cls_ids = np.where(class_scores > thresholds)
+            boxes = boxes[box_indices]
+            scores = class_scores[box_indices, cls_ids]
 
             detections = np.empty((0, 6), dtype=np.float32)
 
@@ -45,13 +82,17 @@ class Tracker2D:
                 boxes_xywh = boxes.copy()
                 boxes_xywh[:, :2] -= boxes_xywh[:, 2:] / 2.0
 
+                # Shift coordinates by class ID so different classes never overlap
+                max_dim = 10000.0
+                boxes_offset = boxes_xywh.copy()
+                boxes_offset[:, :2] += cls_ids[:, None] * max_dim
+
                 nms_indices = cv2.dnn.NMSBoxes(
-                    boxes_xywh,
+                    boxes_offset,
                     scores,
                     0.0,
                     self.nms_threshold,
                 )
-
                 if len(nms_indices) > 0:
                     idx = np.asarray(nms_indices).flatten()
 
@@ -74,7 +115,6 @@ class Tracker2D:
             ball_dets = sv_detections[is_ball]
             other_dets = sv_detections[~is_ball]
 
-            # Track independently
             other_tracks = self.trackers[i].update(other_dets)
             ball_tracks = self.ball_trackers[i].update(ball_dets)
 
@@ -95,7 +135,7 @@ class Tracker2D:
                 else np.empty((0, 7), dtype=np.float32)
             )
             # Discart unconfirmed tracks
-            tracks = tracks[tracks[:, 4] > 0]
+            tracks = tracks[tracks[:, 4] >= 0]
             results.append(tracks)
 
         return results

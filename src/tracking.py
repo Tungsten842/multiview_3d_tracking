@@ -43,16 +43,25 @@ def plot_tracks_3d_rerun(tracks_3d: list) -> None:
 class TrackSaver:
     CAM_IDS = (2, 13)
 
-    def __init__(self, num_cams=2, output_dir="predictions"):
+    def __init__(
+        self,
+        num_cams=2,
+        output_dir="predictions",
+        orig_shape=(720, 1280),
+        crop_shape=(704, 1280),
+    ):
         self.num_cams = num_cams
         self.output_dir = output_dir
-        self.sample_counts = [0] * num_cams
         self.mot_lines = {self.CAM_IDS[i]: [] for i in range(num_cams)}
+        self.y_offset = (orig_shape[0] - crop_shape[0]) // 2
+        self.x_offset = (orig_shape[1] - crop_shape[1]) // 2
 
         os.makedirs(self.output_dir, exist_ok=True)
 
     def save(self, tracks, frame_index):
         if (frame_index - 2) % 5 == 0:
+            mot_frame_idx = ((frame_index - 2) // 5) + 1
+
             for cam_idx in range(self.num_cams):
                 cam_tracks = tracks[cam_idx]
                 if len(cam_tracks) == 0:
@@ -62,12 +71,16 @@ class TrackSaver:
                 mask = np.isin(class_ids, [0, 1])
                 filtered_tracks = cam_tracks[mask]
 
-                self.sample_counts[cam_idx] += 1
                 cidx = self.CAM_IDS[cam_idx]
-                mot_frame_idx = self.sample_counts[cam_idx]
 
                 for track in filtered_tracks:
                     x1, y1, x2, y2 = track[:4]
+                    # Adjust coordinates crop
+                    x1 += self.x_offset
+                    y1 += self.y_offset
+                    x2 += self.x_offset
+                    y2 += self.y_offset
+
                     w = x2 - x1
                     h = y2 - y1
 
@@ -165,11 +178,7 @@ def run_tracking(
         for shm in frame_shms
     ]
 
-    tracker_2d = Tracker2D(
-        num_cams=pred_shape[0],
-        conf_threshold=0.10,
-        nms_threshold=0.60,
-    )
+    tracker_2d = Tracker2D(num_cams=pred_shape[0])
 
     tracker_3d = Tracker3D(calib_dir)
 
