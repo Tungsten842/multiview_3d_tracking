@@ -2,7 +2,6 @@ import os
 import shutil
 from pathlib import Path
 
-import torch
 from ultralytics import YOLO
 
 
@@ -34,9 +33,9 @@ def main():
         scale=0.3,
         cls_pw=1,
         erasing=0.0,
-        epochs=10,
+        epochs=20,
         warmup_epochs=1,
-        close_mosaic=1,
+        close_mosaic=2,
     )
 
     onnx_path = model.export(

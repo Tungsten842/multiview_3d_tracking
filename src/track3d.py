@@ -8,7 +8,17 @@ from scipy.spatial.distance import cdist
 
 
 class KalmanFilter3D:
-    def __init__(self, init_pos, dt=1.0 / 25.0, process_std=2.0, measurement_std=0.10):
+    def __init__(
+        self,
+        init_pos,
+        dt=1.0 / 25.0,
+        process_std=2.0,
+        measurement_std=0.10,
+        v_max=8.0,
+        is_ball=False,
+    ):
+        self.dt = dt
+        self.is_ball = is_ball
         self.kf = cv2.KalmanFilter(6, 3, 0)
 
         self.kf.transitionMatrix = np.eye(6, dtype=np.float32)
@@ -25,7 +35,6 @@ class KalmanFilter3D:
         self.kf.measurementNoiseCov = np.eye(3, dtype=np.float32) * (measurement_std**2)
 
         # Set position and velocity uncertainty
-        v_max = 8.0  # max expected velocity
         v_std = v_max / 3.0
         p_diag = [measurement_std**2] * 3 + [v_std**2] * 3
         self.kf.errorCovPost = np.diag(p_diag).astype(np.float32)
@@ -40,14 +49,15 @@ class KalmanFilter3D:
         self.kf.transitionMatrix[3:6, 3:6] = np.eye(3, dtype=np.float32) * alpha
         return self.kf.predict()[:3].flatten()
 
-    def update(self, measurement, max_dist_threshold=2.0):
-        meas_arr = measurement.reshape(3, 1)
 
-        # Discart outliers
+    def update(self, measurement):
+        meas_arr = measurement.reshape(3, 1)
         predicted_pos = self.kf.statePre[:3]
         dist = np.linalg.norm(meas_arr - predicted_pos)
-        if dist > max_dist_threshold:
-            return self.kf.statePost[:3].flatten()
+
+        # Handle sudden direction changes
+        if self.is_ball and dist > 1.2:
+            self.kf.errorCovPre[3:6, 3:6] += np.eye(3, dtype=np.float32) * 10.0
 
         return self.kf.correct(meas_arr)[:3].flatten()
 
@@ -113,7 +123,7 @@ def load_camera_calibrations(
 
 class Tracker3D:
     def __init__(
-        self, calib_dir, max_ray_dist=0.20, max_dist_3d=1.0, max_age=25, min_hits=2
+        self, calib_dir, max_ray_dist=0.25, max_dist_3d=1.0, max_age=25, min_hits=2
     ):
         self.cameras = load_camera_calibrations(calib_dir)
         self.max_ray_dist = max_ray_dist
@@ -222,9 +232,10 @@ class Tracker3D:
 
             # Hungarian algorithm
             rows, cols = linear_sum_assignment(cost_matrix)
-
-            valid = cost_matrix[rows, cols] < self.max_dist_3d
-            for r, c in zip(rows[valid], cols[valid]):
+            for r, c in zip(rows, cols):
+                max_dist = 4.0 if tri_cls[c] == 1 else self.max_dist_3d
+                if cost_matrix[r, c] >= max_dist:
+                    continue
                 trk = self.tracks[track_ids[r]]
                 trk["pos"] = trk["kf"].update(tri_pts[c])
                 trk["age"] = 0
@@ -235,8 +246,20 @@ class Tracker3D:
 
         # Add unmatched detections as new tracks
         for c in set(range(len(tri_pts))) - matched_dets:
+            is_ball = tri_cls[c] == 1
+            kf = (
+                KalmanFilter3D(
+                    tri_pts[c],
+                    process_std=25.0,
+                    measurement_std=0.05,
+                    v_max=35.0,
+                    is_ball=True,
+                )
+                if is_ball
+                else KalmanFilter3D(tri_pts[c])
+            )
             self.tracks[self.next_id] = {
-                "kf": KalmanFilter3D(tri_pts[c]),
+                "kf": kf,
                 "pos": tri_pts[c],
                 "class_id": tri_cls[c],
                 "cam_ids": tri_ids[c],

@@ -29,7 +29,7 @@ def plot_tracks_3d_rerun(tracks_3d: list) -> None:
     )
     sizes = np.array(
         [
-            [0.24, 0.24, 0.24] if t.get("class") == 1 else [0.6, 0.6, 1.7]
+            [0.24, 0.24, 0.24] if t.get("class_id") == 1 else [0.6, 0.6, 1.7]
             for t in tracks_3d
         ]
     )
@@ -198,7 +198,7 @@ def run_tracking(
         "world/origin",
         rr.Arrows3D(
             origins=[[0, 0, 0], [0, 0, 0], [0, 0, 0]],
-            vectors=[[2.0, 0, 0], [0, 2.0, 0], [0, 0, 2.0]],
+            vectors=[[-2.0, 0, 0], [0, 2.0, 0], [0, 0, 2.0]],
             colors=[[255, 0, 0], [0, 255, 0], [0, 0, 255]],
         ),
         static=True,
