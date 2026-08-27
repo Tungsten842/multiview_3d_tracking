@@ -1,3 +1,4 @@
+import time
 from multiprocessing.shared_memory import SharedMemory
 from queue import Queue
 from threading import Thread
@@ -57,6 +58,7 @@ class BatchProducer(Thread):
         self.ready_queue = ready_queue
         self.shm_names = shm_names
         self.batch_shape = batch_shape
+        self.fps = 25
 
     def run(self):
         shm_blocks = [SharedMemory(name=name) for name in self.shm_names]
@@ -65,6 +67,7 @@ class BatchProducer(Thread):
             for shm in shm_blocks
         ]
 
+        next_time = time.monotonic()
         while True:
             frames = []
             for worker in self.workers:
@@ -77,6 +80,8 @@ class BatchProducer(Thread):
                 buffers[slot_idx][i] = frame
 
             self.ready_queue.put(slot_idx)
+            next_time += 1 / self.fps
+            time.sleep(max(0.0, next_time - time.monotonic()))
 
 
 class VideoPipeline:
