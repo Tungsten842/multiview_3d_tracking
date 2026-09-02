@@ -49,7 +49,6 @@ class KalmanFilter3D:
         self.kf.transitionMatrix[3:6, 3:6] = np.eye(3, dtype=np.float32) * alpha
         return self.kf.predict()[:3].flatten()
 
-
     def update(self, measurement):
         meas_arr = measurement.reshape(3, 1)
         predicted_pos = self.kf.statePre[:3]
@@ -123,20 +122,27 @@ def load_camera_calibrations(
 
 class Tracker3D:
     def __init__(
-        self, calib_dir, max_ray_dist=0.25, max_dist_3d=1.0, max_age=25, min_hits=2
+        self,
+        calib_dir,
+        max_ray_dist=0.25,
+        max_dist_3d=1.0,
+        max_age=25,
+        max_coast=15,
+        min_hits=2,
     ):
         self.cameras = load_camera_calibrations(calib_dir)
         self.max_ray_dist = max_ray_dist
         self.max_dist_3d = max_dist_3d
         self.max_age = max_age
+        self.max_coast = max_coast
         self.min_hits = min_hits
         self.tracks = {}
         self.next_id = 1
 
-        # Precompute & cache static camera projection parameters
         cam0, cam1 = self.cameras[0], self.cameras[1]
         self.K0, self.dist0 = cam0["K"], cam0["dist"]
         self.K1, self.dist1 = cam1["K"], cam1["dist"]
+
         self.R0, self.t0 = cam0["R"], cam0["tvec"]
         self.R1, self.t1 = cam1["R"], cam1["tvec"]
 
@@ -157,7 +163,7 @@ class Tracker3D:
 
         cls0, cls1 = t0[:, 6].astype(int), t1[:, 6].astype(int)
 
-        # Find all pairs with same class id
+        # Generate all pairs with same class id
         i0_m, i1_m = np.where(cls0[:, None] == cls1[None, :])
         if len(i0_m) == 0:
             return [], [], []
@@ -178,8 +184,10 @@ class Tracker3D:
         pts3d_v, xc0_v, xc1_v = pts3d[valid], xc0[valid], xc1[valid]
 
         # Calculate ray distance
-        err0 = np.linalg.norm(xc0_v[:, :2] - p0[i0_v] * xc0_v[:, 2:3], axis=1)
-        err1 = np.linalg.norm(xc1_v[:, :2] - p1[i1_v] * xc1_v[:, 2:3], axis=1)
+        pred_xy0 = p0[i0_v] * xc0_v[:, 2:3]
+        pred_xy1 = p1[i1_v] * xc1_v[:, 2:3]
+        err0 = np.linalg.norm(xc0_v[:, :2] - pred_xy0, axis=1)
+        err1 = np.linalg.norm(xc1_v[:, :2] - pred_xy1, axis=1)
         ray_dist = (err0 + err1) * 0.5
 
         # Construct cost matrix
@@ -205,8 +213,8 @@ class Tracker3D:
         # Triangulate and predict
         tri_pts, tri_cls, tri_ids = self._triangulate(multi_cam_tracks)
         for trk in self.tracks.values():
-            trk["age"] += 1
-            is_missed = trk["age"] > 1
+            trk["miss_count"] += 1
+            is_missed = trk["miss_count"] > 1
             trk["pos"] = trk["kf"].predict(missed=is_missed)
 
         matched_dets = set()
@@ -238,7 +246,7 @@ class Tracker3D:
                     continue
                 trk = self.tracks[track_ids[r]]
                 trk["pos"] = trk["kf"].update(tri_pts[c])
-                trk["age"] = 0
+                trk["miss_count"] = 0
                 trk["cam_ids"] = tri_ids[c]
 
                 trk["hits"] += 1
@@ -263,16 +271,18 @@ class Tracker3D:
                 "pos": tri_pts[c],
                 "class_id": tri_cls[c],
                 "cam_ids": tri_ids[c],
-                "age": 0,
+                "miss_count": 0,
                 "hits": 1,
             }
             self.next_id += 1
 
         # Remove dead tracks
-        self.tracks = {k: v for k, v in self.tracks.items() if v["age"] <= self.max_age}
+        self.tracks = {
+            k: v for k, v in self.tracks.items() if v["miss_count"] <= self.max_age
+        }
 
         return [
             {"id": k, "pos": v["pos"], "class_id": v["class_id"]}
             for k, v in self.tracks.items()
-            if v["hits"] >= self.min_hits and v["age"] <= 15
+            if v["hits"] >= self.min_hits and v["miss_count"] <= self.max_coast
         ]
